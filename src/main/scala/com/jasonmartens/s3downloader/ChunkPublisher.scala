@@ -5,7 +5,7 @@ import akka.actor.Status.Success
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.headers.{ByteRange, Range}
 import akka.http.scaladsl.model.{HttpRequest, HttpResponse}
-import akka.stream.ActorFlowMaterializer
+import akka.stream.ActorMaterializer
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
 import akka.stream.scaladsl.Sink
@@ -34,7 +34,7 @@ object ChunkPublisher {
 class ChunkPublisher(url: String, chunkList: List[RequestChunk]) extends ActorPublisher[ByteString] {
   implicit val system = context.system
   implicit val executionContext = context.dispatcher
-  implicit val materializer = ActorFlowMaterializer()
+  implicit val materializer = ActorMaterializer()
 
   sealed trait DownloadState
   case object Ready extends DownloadState
@@ -135,5 +135,10 @@ class ChunkPublisher(url: String, chunkList: List[RequestChunk]) extends ActorPu
     case DownloadFailed(n) => println("DownloadFailed"); downloadChunk(chunkMap(n))
     case DownloadTimeout(n) => println("DownloadTimeout"); downloadChunk(chunkMap(n))
     case x => println(s"Got unknown message $x")
+  }
+
+  override def postStop(): Unit = {
+    super.postStop()
+    println( "Stopped") ;
   }
 }

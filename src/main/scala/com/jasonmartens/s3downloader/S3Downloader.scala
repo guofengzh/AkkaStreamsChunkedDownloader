@@ -3,7 +3,7 @@ package com.jasonmartens.s3downloader
 import java.util.Calendar
 
 import akka.actor.ActorSystem
-import akka.stream.ActorFlowMaterializer
+import akka.stream.ActorMaterializer
 import akka.stream.scaladsl._
 import akka.util.ByteString
 import com.amazonaws.HttpMethod
@@ -51,7 +51,7 @@ object S3Downloader extends App {
   val keyName = args(2)
 
   implicit val system = ActorSystem(s"s3download-system")
-  implicit val materializer = ActorFlowMaterializer()
+  implicit val materializer = ActorMaterializer()
   implicit def executor: ExecutionContextExecutor = system.dispatcher
 
   val initData = GetS3SignedURL(credentialsPath, bucketName, keyName)
