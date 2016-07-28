@@ -4,7 +4,7 @@ import akka.actor.Props
 import akka.actor.Status.Success
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.headers.{ByteRange, Range}
-import akka.http.scaladsl.model.{HttpRequest, HttpResponse}
+import akka.http.scaladsl.model.{HttpRequest, HttpResponse, ResponseEntity, StatusCodes}
 import akka.stream.ActorMaterializer
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
@@ -34,7 +34,7 @@ object ChunkPublisher {
 class ChunkPublisher(url: String, chunkList: List[RequestChunk]) extends ActorPublisher[ByteString] {
   implicit val system = context.system
   implicit val executionContext = context.dispatcher
-  implicit val materializer = ActorMaterializer()
+  //implicit val materializer = ActorMaterializer()
 
   sealed trait DownloadState
   case object Ready extends DownloadState
@@ -52,15 +52,38 @@ class ChunkPublisher(url: String, chunkList: List[RequestChunk]) extends ActorPu
   def netDemand = totalDemand - inFlightDemand
 
   def downloadChunk(chunk: RequestChunk): Unit = {
+    implicit val materializer = ActorMaterializer.create(system);
     val request = HttpRequest(
       uri = url.toString,
       // Range is inclusive, so -1
       headers = List(Range(ByteRange(chunk.offset, (chunk.offset + chunk.size) - 1))))
-    val response: Future[HttpResponse] = Http().singleRequest(request)
+      val response: Future[HttpResponse] = Http().singleRequest(request)
+
+      def dealWith(entity:ResponseEntity): Unit = {
+        val source = entity.dataBytes
+        val fut = source.grouped(10000000).runWith(Sink.head)
+        fut.onComplete(data => self ! ChunkData(chunk.number, data.map(d => d.fold(ByteString())(_ ++ _))))
+      }
+
+    response.map({
+      case HttpResponse(StatusCodes.OK, headers, entity, _) =>
+        //onNext(ByteString.fromString("Hahaha"))
+        //requestChunks() ;
+        dealWith(entity) ;
+        //self ! ChunkData(chunk.number, Try(ByteString.fromString("Babao")))
+      case HttpResponse(StatusCodes.PartialContent, headers, entity, _) =>
+        //onNext(ByteString.fromString("Babao"))
+        //requestChunks() ;
+        dealWith(entity) ;
+        //self ! ChunkData(chunk.number, Try(ByteString.fromString("Babao")))
+      case HttpResponse(code, _, _, _) =>
+        println("Request failed, response code: " + code)
+        self ! DownloadFailed(chunk.number)
+    })
     println(s"Downloading chunk ${chunk.number}")
-    response.onComplete(data => self ! ChunkDownloaded(chunk.number, data))
+    //response.onComplete(data => self ! ChunkDownloaded(chunk.number, data))
     response.onFailure {case ex: Exception => println(ex); self ! DownloadFailed(chunk.number)}
-//    context.system.scheduler.scheduleOnce(downloadTimeout, self, DownloadTimeout(chunk.number))
+    //context.system.scheduler.scheduleOnce(downloadTimeout, self, DownloadTimeout(chunk.number))
   }
 
   def remainingChunks: List[Int] =
@@ -80,7 +103,9 @@ class ChunkPublisher(url: String, chunkList: List[RequestChunk]) extends ActorPu
         inFlightDemand += 1
         chunksLeft = chunksLeft.tail
       }
-      else println(s"No demand - totalDemand: $totalDemand, inFlightDemand: $inFlightDemand")
+      else {
+        println(s"No demand - totalDemand: $totalDemand, inFlightDemand: $inFlightDemand")
+      }
     } catch {
       case ex: Exception => println(ex)
     }
@@ -88,6 +113,15 @@ class ChunkPublisher(url: String, chunkList: List[RequestChunk]) extends ActorPu
 
   def emitChunks(): Unit = {
     println(s"emitChunks - Active: $isActive")
+
+    // 似乎应该是：
+    // while (isActice && completedCunks.contas(nextChunkToEmit)， 这样，可以
+    // 确保在之前的失败的chunk成功之后，其后的chunk能够也被emit掉
+    // 问题就变成：
+    //    根据totalDemand来确定:
+    //       1,应该有多少http request
+    //       2.在有totaldemand和nextChunkToEmit的情况下，emit，每emit一个，都要发个http request的请求
+    //       http请求不能多于totaldemand，但又不能太多。
     if (isActive && completedChunks.contains(nextChunkToEmit)) {
         println(s"emitting chunk $nextChunkToEmit")
         onNext(completedChunks(nextChunkToEmit))
@@ -100,17 +134,10 @@ class ChunkPublisher(url: String, chunkList: List[RequestChunk]) extends ActorPu
       println(s"Chunk $nextChunkToEmit failed")
       self ! DownloadFailed(nextChunkToEmit)
     }
-    if (allChunksCompleted) println("All chunks completed..."); onCompleteThenStop()
-  }
-
-  def chunkComplete(number: Int, response: Try[HttpResponse]): Unit = {
-    println(s"chunkComplete: $number:${response.isSuccess}")
-    if (response.isSuccess) {
-      val source = response.get.entity.dataBytes
-      val fut = source.grouped(10000000).runWith(Sink.head)
-      fut.onComplete(data => self ! ChunkData(number, data.map(d => d.fold(ByteString())(_ ++ _))))
-      fut.onFailure {case ex: Exception => println(ex) }
-    }
+    if (allChunksCompleted) {
+      println("All chunks completed...")
+      onCompleteThenStop()
+    };
   }
 
   def chunkData(number: Int, data: Try[ByteString]): Unit = {
@@ -130,15 +157,15 @@ class ChunkPublisher(url: String, chunkList: List[RequestChunk]) extends ActorPu
     case Request(_) => println("Request"); requestChunks()
     case Cancel => println("Cancel"); context.stop(self)
     case Success => println("Success")
-    case ChunkDownloaded(n, r) => println("ChunkDownloaded"); chunkComplete(n, r)
+    //case ChunkDownloaded(n, r) => println("ChunkDownloaded"); chunkComplete(n, r)
     case ChunkData(n, d) => println("ChunkData"); chunkData(n, d)
     case DownloadFailed(n) => println("DownloadFailed"); downloadChunk(chunkMap(n))
     case DownloadTimeout(n) => println("DownloadTimeout"); downloadChunk(chunkMap(n))
     case x => println(s"Got unknown message $x")
   }
-
   override def postStop(): Unit = {
     super.postStop()
+
     println( "Stopped") ;
   }
 }
