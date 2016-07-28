@@ -34,7 +34,7 @@ object ChunkPublisher {
 class ChunkPublisher(url: String, chunkList: List[RequestChunk]) extends ActorPublisher[ByteString] {
   implicit val system = context.system
   implicit val executionContext = context.dispatcher
-  //implicit val materializer = ActorMaterializer()
+  implicit val materializer = ActorMaterializer()
 
   sealed trait DownloadState
   case object Ready extends DownloadState
@@ -52,7 +52,7 @@ class ChunkPublisher(url: String, chunkList: List[RequestChunk]) extends ActorPu
   def netDemand = totalDemand - inFlightDemand
 
   def downloadChunk(chunk: RequestChunk): Unit = {
-    implicit val materializer = ActorMaterializer.create(system);
+    //implicit val materializer = ActorMaterializer.create(system);
     val request = HttpRequest(
       uri = url.toString,
       // Range is inclusive, so -1
