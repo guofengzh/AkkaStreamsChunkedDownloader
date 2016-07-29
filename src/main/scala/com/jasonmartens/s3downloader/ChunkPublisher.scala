@@ -67,15 +67,9 @@ class ChunkPublisher(url: String, chunkList: List[RequestChunk]) extends ActorPu
 
     response.map({
       case HttpResponse(StatusCodes.OK, headers, entity, _) =>
-        //onNext(ByteString.fromString("Hahaha"))
-        //requestChunks() ;
         dealWith(entity) ;
-        //self ! ChunkData(chunk.number, Try(ByteString.fromString("Babao")))
       case HttpResponse(StatusCodes.PartialContent, headers, entity, _) =>
-        //onNext(ByteString.fromString("Babao"))
-        //requestChunks() ;
         dealWith(entity) ;
-        //self ! ChunkData(chunk.number, Try(ByteString.fromString("Babao")))
       case HttpResponse(code, _, _, _) =>
         println("Request failed, response code: " + code)
         self ! DownloadFailed(chunk.number)
@@ -136,7 +130,10 @@ class ChunkPublisher(url: String, chunkList: List[RequestChunk]) extends ActorPu
     }
     if (allChunksCompleted) {
       println("All chunks completed...")
-      onCompleteThenStop()
+      Http().shutdownAllConnectionPools().onComplete { _ ⇒
+        System.out.println("connection pool closed")
+        onCompleteThenStop()
+      }
     };
   }
 
